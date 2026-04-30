@@ -11,6 +11,9 @@ export const metadata: Metadata = {
   title: "カロリー管理 | 毎食のカロリー・PFCを記録",
   description: "毎食のカロリー・タンパク質・脂質・炭水化物を記録して1日の栄養バランスを管理。食品DBから選ぶだけで簡単入力。無料で使えるシンプルなカロリー管理アプリ。",
   metadataBase: new URL(BASE_URL),
+  verification: {
+    google: "2kYBgbz5xryW_QpoMyEpkwlTDBH13xYR22zxZFy3xLo",
+  },
   openGraph: {
     title: "カロリー管理 | 毎食のカロリー・PFCを記録",
     description: "毎食のカロリー・PFCを記録して1日の栄養バランスを管理。食品DBから選ぶだけで簡単入力。",
