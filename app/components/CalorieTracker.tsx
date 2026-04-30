@@ -99,6 +99,54 @@ function calcFromAmount(food: FoodDB, amount: number) {
   };
 }
 
+type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
+type GoalType = "lose" | "maintain" | "gain";
+
+const ACTIVITY_LABELS: Record<ActivityLevel, string> = {
+  sedentary: "ほぼ運動しない（デスクワーク中心）",
+  light: "軽い運動（週1〜3回）",
+  moderate: "適度な運動（週3〜5回）",
+  active: "激しい運動（週6〜7回）",
+  very_active: "非常に激しい運動（肉体労働など）",
+};
+const ACTIVITY_MULTIPLIER: Record<ActivityLevel, number> = {
+  sedentary: 1.2, light: 1.375, moderate: 1.55, active: 1.725, very_active: 1.9,
+};
+const GOAL_LABELS: Record<GoalType, string> = {
+  lose: "減量（体重を減らしたい）",
+  maintain: "維持（体重を維持したい）",
+  gain: "増量（筋肉・体重を増やしたい）",
+};
+const GOAL_ADJUSTMENT: Record<GoalType, number> = { lose: -400, maintain: 0, gain: 300 };
+
+function calcTargets(
+  gender: "male" | "female",
+  age: number,
+  height: number,
+  weight: number,
+  activity: ActivityLevel,
+  goal: GoalType
+) {
+  // Mifflin-St Jeor
+  const bmr = gender === "male"
+    ? 10 * weight + 6.25 * height - 5 * age + 5
+    : 10 * weight + 6.25 * height - 5 * age - 161;
+  const tdee = Math.round(bmr * ACTIVITY_MULTIPLIER[activity]);
+  const targetCal = Math.max(1200, tdee + GOAL_ADJUSTMENT[goal]);
+  // PFC比率: 減量時はタンパク質多め、増量時は炭水化物多め
+  const proteinRatio = goal === "lose" ? 0.30 : goal === "gain" ? 0.25 : 0.25;
+  const fatRatio = 0.25;
+  const carbRatio = 1 - proteinRatio - fatRatio;
+  return {
+    calories: Math.round(targetCal),
+    protein: Math.round((targetCal * proteinRatio) / 4),
+    fat: Math.round((targetCal * fatRatio) / 9),
+    carbs: Math.round((targetCal * carbRatio) / 4),
+    bmr: Math.round(bmr),
+    tdee,
+  };
+}
+
 function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
   const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   const over = max > 0 && value > max;
@@ -138,6 +186,14 @@ export default function CalorieTracker() {
   const [sTargetP, setSTargetP] = useState("");
   const [sTargetF, setSTargetF] = useState("");
   const [sTargetC, setSTargetC] = useState("");
+  const [calcOpen, setCalcOpen] = useState(false);
+  const [calcGender, setCalcGender] = useState<"male" | "female">("male");
+  const [calcAge, setCalcAge] = useState("");
+  const [calcHeight, setCalcHeight] = useState("");
+  const [calcWeight, setCalcWeight] = useState("");
+  const [calcActivity, setCalcActivity] = useState<ActivityLevel>("moderate");
+  const [calcGoal, setCalcGoal] = useState<GoalType>("lose");
+  const [calcResult, setCalcResult] = useState<ReturnType<typeof calcTargets> | null>(null);
 
   useEffect(() => {
     const r = localStorage.getItem(RECORDS_KEY);
@@ -578,8 +634,121 @@ export default function CalorieTracker() {
       {/* 設定モーダル */}
       {settingsOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-end z-40" onClick={() => setSettingsOpen(false)}>
-          <div className="bg-white w-full max-w-xl mx-auto rounded-t-3xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white w-full max-w-xl mx-auto rounded-t-3xl p-6 space-y-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-bold text-gray-800">目標設定</h2>
+
+            {/* 目標カロリー自動計算 */}
+            <button
+              onClick={() => { setCalcOpen(!calcOpen); setCalcResult(null); }}
+              className="w-full border border-amber-400 text-amber-600 rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2"
+            >
+              <span>✨</span>
+              {calcOpen ? "自動計算を閉じる" : "目標カロリーを自動計算する"}
+            </button>
+
+            {calcOpen && (
+              <div className="bg-amber-50 rounded-2xl p-4 space-y-3">
+                {/* 性別 */}
+                <div className="flex gap-2">
+                  {(["male", "female"] as const).map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => setCalcGender(g)}
+                      className={`flex-1 py-2 rounded-xl text-sm font-medium border transition-colors ${calcGender === g ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200"}`}
+                    >
+                      {g === "male" ? "男性" : "女性"}
+                    </button>
+                  ))}
+                </div>
+                {/* 年齢・身長・体重 */}
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { label: "年齢", val: calcAge, set: setCalcAge, unit: "歳" },
+                    { label: "身長", val: calcHeight, set: setCalcHeight, unit: "cm" },
+                    { label: "体重", val: calcWeight, set: setCalcWeight, unit: "kg" },
+                  ]).map(({ label, val, set, unit }) => (
+                    <div key={label}>
+                      <label className="text-xs text-gray-500 block mb-1">{label}</label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text" inputMode="decimal" value={val}
+                          onChange={(e) => set(e.target.value)}
+                          className="border rounded-lg px-2 py-1.5 text-sm w-full bg-white"
+                        />
+                        <span className="text-xs text-gray-400 flex-shrink-0">{unit}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* 活動量 */}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">活動量</label>
+                  <select
+                    value={calcActivity}
+                    onChange={(e) => setCalcActivity(e.target.value as ActivityLevel)}
+                    className="border rounded-xl px-3 py-2 text-sm w-full bg-white"
+                  >
+                    {(Object.keys(ACTIVITY_LABELS) as ActivityLevel[]).map((k) => (
+                      <option key={k} value={k}>{ACTIVITY_LABELS[k]}</option>
+                    ))}
+                  </select>
+                </div>
+                {/* 目標 */}
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">目標</label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(Object.keys(GOAL_LABELS) as GoalType[]).map((g) => (
+                      <button
+                        key={g}
+                        onClick={() => setCalcGoal(g)}
+                        className={`py-2 rounded-xl text-xs font-medium border transition-colors ${calcGoal === g ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200"}`}
+                      >
+                        {g === "lose" ? "減量" : g === "maintain" ? "維持" : "増量"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    const age = parseInt(toHalf(calcAge));
+                    const height = parseFloat(toHalf(calcHeight));
+                    const weight = parseFloat(toHalf(calcWeight));
+                    if (isNaN(age) || isNaN(height) || isNaN(weight)) { showToast("年齢・身長・体重を入力してください"); return; }
+                    setCalcResult(calcTargets(calcGender, age, height, weight, calcActivity, calcGoal));
+                  }}
+                  className="w-full bg-amber-500 text-white rounded-xl py-2.5 font-bold text-sm"
+                >
+                  計算する
+                </button>
+
+                {calcResult && (
+                  <div className="bg-white rounded-xl p-4 space-y-3 border border-amber-200">
+                    <p className="text-xs text-gray-500">基礎代謝: <span className="font-bold text-gray-800">{calcResult.bmr} kcal</span>　消費カロリー: <span className="font-bold text-gray-800">{calcResult.tdee} kcal</span></p>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div><p className="text-xs text-gray-400">カロリー</p><p className="text-base font-bold text-amber-600">{calcResult.calories}</p></div>
+                      <div><p className="text-xs text-gray-400">P(g)</p><p className="text-base font-bold text-blue-600">{calcResult.protein}</p></div>
+                      <div><p className="text-xs text-gray-400">F(g)</p><p className="text-base font-bold text-red-500">{calcResult.fat}</p></div>
+                      <div><p className="text-xs text-gray-400">C(g)</p><p className="text-base font-bold text-green-600">{calcResult.carbs}</p></div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSTargetCal(String(calcResult.calories));
+                        setSTargetP(String(calcResult.protein));
+                        setSTargetF(String(calcResult.fat));
+                        setSTargetC(String(calcResult.carbs));
+                        setCalcOpen(false);
+                        showToast("目標値に反映しました");
+                      }}
+                      className="w-full border border-amber-500 text-amber-600 rounded-xl py-2 text-sm font-bold"
+                    >
+                      この値を目標に設定する
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {([
               { label: "目標カロリー (kcal)", val: sTargetCal, set: setSTargetCal },
               { label: "目標タンパク質 (g)", val: sTargetP, set: setSTargetP },
